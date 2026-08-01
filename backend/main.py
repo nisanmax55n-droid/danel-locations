@@ -1,5 +1,9 @@
+import json
 import os
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -25,6 +29,9 @@ BOOTSTRAP_USERNAME = os.getenv("BOOTSTRAP_USERNAME", "owner")
 BOOTSTRAP_PASSWORD = os.getenv("BOOTSTRAP_PASSWORD", "ChangeMe123!")
 ACCESS_TOKEN_HOURS = int(os.getenv("ACCESS_TOKEN_HOURS", "12"))
 CORS_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
+EMPLOYEE_DIRECTORY_URL = os.getenv("EMPLOYEE_DIRECTORY_URL", "").rstrip("/")
+EMPLOYEE_DIRECTORY_KEY = os.getenv("EMPLOYEE_DIRECTORY_KEY", "")
+EMPLOYEE_INITIAL_PASSWORD = os.getenv("EMPLOYEE_INITIAL_PASSWORD", "Aa1234")
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
@@ -60,6 +67,40 @@ class Location(Base):
     created_by: Mapped[User] = relationship()
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+class EmployeeAccount(Base):
+    __tablename__ = "employee_accounts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    worker_ref: Mapped[int] = mapped_column(index=True)
+    id_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(120))
+    password_digest: Mapped[str] = mapped_column(String(255))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LocationRequest(Base):
+    __tablename__ = "location_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    place_type: Mapped[str] = mapped_column(String(20), index=True)
+    name: Mapped[str] = mapped_column(String(180), index=True)
+    km: Mapped[str] = mapped_column(String(40), default="")
+    waze_url: Mapped[str] = mapped_column(Text, default="")
+    maps_url: Mapped[str] = mapped_column(Text, default="")
+    coordinates: Mapped[str] = mapped_column(String(80), default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    review_note: Mapped[str] = mapped_column(Text, default="")
+    employee_account_id: Mapped[int] = mapped_column(ForeignKey("employee_accounts.id"))
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    submitted_by: Mapped[EmployeeAccount] = relationship(foreign_keys=[employee_account_id])
+    reviewed_by: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_id])
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
 
 Base.metadata.create_all(engine)
 
@@ -108,6 +149,36 @@ class LocationOut(LocationIn):
     created_at: datetime
     updated_at: datetime
 
+
+class EmployeeLoginIn(BaseModel):
+    id_number: str = Field(min_length=5, max_length=32)
+    password: str = Field(min_length=6, max_length=256)
+
+
+class EmployeeOut(BaseModel):
+    id: int
+    id_number: str
+    full_name: str
+    must_change_password: bool
+
+
+class EmployeePasswordChangeIn(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=10, max_length=256)
+
+
+class LocationRequestOut(LocationIn):
+    id: int
+    status: str
+    review_note: str
+    submitted_by_name: str
+    created_at: datetime
+    reviewed_at: datetime | None
+
+
+class ReviewIn(BaseModel):
+    note: str = Field(default="", max_length=2000)
+
 app = FastAPI(title="Danel Locations API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -143,8 +214,48 @@ bootstrap_owner()
 
 
 def issue_token(user: User) -> str:
-    payload = {"sub": str(user.id), "exp": datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_HOURS)}
+    payload = {"sub": str(user.id), "kind": "internal", "exp": datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_HOURS)}
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+
+def issue_employee_token(employee: EmployeeAccount) -> str:
+    payload = {"sub": str(employee.id), "kind": "employee", "exp": datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_HOURS)}
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+
+def bearer_payload(request: Request) -> dict:
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="נדרשת התחברות")
+    try:
+        return jwt.decode(auth[7:], SECRET_KEY, algorithms=["HS256"])
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="החיבור פג או אינו תקין") from exc
+
+
+def normalize_id_number(value: str) -> str:
+    normalized = re.sub(r"\D", "", value)
+    if not 5 <= len(normalized) <= 9:
+        raise HTTPException(status_code=400, detail="יש להזין תעודת זהות תקינה")
+    return normalized
+
+
+def directory_worker(id_number: str) -> dict:
+    if not EMPLOYEE_DIRECTORY_URL or not EMPLOYEE_DIRECTORY_KEY:
+        raise HTTPException(status_code=503, detail="החיבור למאגר העובדים טרם הוגדר")
+    url = f"{EMPLOYEE_DIRECTORY_URL}/{urllib.parse.quote(id_number)}"
+    req = urllib.request.Request(url, headers={"X-Integration-Key": EMPLOYEE_DIRECTORY_KEY})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise HTTPException(status_code=401, detail="תעודת הזהות או הסיסמה שגויות") from exc
+        if exc.code == 401:
+            raise HTTPException(status_code=503, detail="החיבור למאגר העובדים אינו מורשה") from exc
+        raise HTTPException(status_code=503, detail="מאגר העובדים אינו זמין כעת") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="מאגר העובדים אינו זמין כעת") from exc
 
 
 def current_user(request: Request, db: Session = Depends(db_session)) -> User:
@@ -153,12 +264,30 @@ def current_user(request: Request, db: Session = Depends(db_session)) -> User:
         raise HTTPException(status_code=401, detail="נדרשת התחברות")
     try:
         payload = jwt.decode(auth[7:], SECRET_KEY, algorithms=["HS256"])
+        if payload.get("kind", "internal") != "internal":
+            raise ValueError("wrong token kind")
         user = db.get(User, int(payload["sub"]))
     except Exception as exc:
         raise HTTPException(status_code=401, detail="החיבור פג או אינו תקין") from exc
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="המשתמש אינו פעיל")
     return user
+
+
+def current_employee(request: Request, db: Session = Depends(db_session)) -> EmployeeAccount:
+    payload = bearer_payload(request)
+    if payload.get("kind") != "employee":
+        raise HTTPException(status_code=401, detail="נדרשת התחברות למערכת העובדים")
+    employee = db.get(EmployeeAccount, int(payload["sub"]))
+    if not employee or not employee.is_active:
+        raise HTTPException(status_code=401, detail="חשבון העובד אינו פעיל")
+    return employee
+
+
+def active_employee(employee: EmployeeAccount = Depends(current_employee)) -> EmployeeAccount:
+    if employee.must_change_password:
+        raise HTTPException(status_code=403, detail="יש להחליף את הסיסמה הראשונית")
+    return employee
 
 
 def owner_only(user: User = Depends(current_user)) -> User:
@@ -173,6 +302,29 @@ def user_payload(user: User) -> UserOut:
 
 def location_payload(item: Location) -> LocationOut:
     return LocationOut.model_validate(item, from_attributes=True)
+
+
+def employee_payload(employee: EmployeeAccount) -> EmployeeOut:
+    return EmployeeOut.model_validate(employee, from_attributes=True)
+
+
+def location_request_payload(item: LocationRequest) -> LocationRequestOut:
+    return LocationRequestOut(
+        id=item.id,
+        category=item.category,
+        place_type=item.place_type,
+        name=item.name,
+        km=item.km,
+        waze_url=item.waze_url,
+        maps_url=item.maps_url,
+        coordinates=item.coordinates,
+        notes=item.notes,
+        status=item.status,
+        review_note=item.review_note,
+        submitted_by_name=item.submitted_by.full_name,
+        created_at=item.created_at,
+        reviewed_at=item.reviewed_at,
+    )
 
 @app.get("/api/health")
 def health():
@@ -226,6 +378,149 @@ def toggle_user(user_id: int, owner: User = Depends(owner_only), db: Session = D
     user.is_active = not user.is_active
     db.commit()
     return user_payload(user)
+
+@app.post("/api/employee-auth/login")
+def employee_login(data: EmployeeLoginIn, db: Session = Depends(db_session)):
+    id_number = normalize_id_number(data.id_number)
+    worker = directory_worker(id_number)
+    if not worker.get("is_active", False):
+        raise HTTPException(status_code=403, detail="העובד אינו פעיל במאגר העובדים")
+    employee = db.scalar(select(EmployeeAccount).where(EmployeeAccount.id_number == id_number))
+    if not employee:
+        employee = EmployeeAccount(
+            worker_ref=int(worker["worker_id"]),
+            id_number=id_number,
+            full_name=str(worker["full_name"]).strip(),
+            password_digest=password_hash.hash(EMPLOYEE_INITIAL_PASSWORD),
+            must_change_password=True,
+        )
+        db.add(employee)
+        db.flush()
+    employee.worker_ref = int(worker["worker_id"])
+    employee.full_name = str(worker["full_name"]).strip()
+    employee.is_active = True
+    if not password_hash.verify(data.password, employee.password_digest):
+        db.rollback()
+        raise HTTPException(status_code=401, detail="תעודת הזהות או הסיסמה שגויות")
+    employee.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(employee)
+    return {"token": issue_employee_token(employee), "employee": employee_payload(employee)}
+
+
+@app.get("/api/employee-auth/me")
+def employee_me(employee: EmployeeAccount = Depends(current_employee)):
+    return employee_payload(employee)
+
+
+@app.post("/api/employee-auth/change-password")
+def employee_change_password(
+    data: EmployeePasswordChangeIn,
+    employee: EmployeeAccount = Depends(current_employee),
+    db: Session = Depends(db_session),
+):
+    if not password_hash.verify(data.current_password, employee.password_digest):
+        raise HTTPException(status_code=400, detail="הסיסמה הנוכחית שגויה")
+    if data.new_password == EMPLOYEE_INITIAL_PASSWORD:
+        raise HTTPException(status_code=400, detail="יש לבחור סיסמה אישית חדשה")
+    employee.password_digest = password_hash.hash(data.new_password)
+    employee.must_change_password = False
+    db.commit()
+    db.refresh(employee)
+    return {"token": issue_employee_token(employee), "employee": employee_payload(employee)}
+
+
+@app.get("/api/employee/locations")
+def employee_locations(_: EmployeeAccount = Depends(active_employee), db: Session = Depends(db_session)):
+    stmt = select(Location).order_by(Location.category, Location.place_type, Location.name)
+    return [location_payload(x) for x in db.scalars(stmt).all()]
+
+
+@app.get("/api/employee/location-requests")
+def employee_requests(employee: EmployeeAccount = Depends(active_employee), db: Session = Depends(db_session)):
+    stmt = select(LocationRequest).where(LocationRequest.employee_account_id == employee.id).order_by(LocationRequest.created_at.desc())
+    return [location_request_payload(x) for x in db.scalars(stmt).all()]
+
+
+@app.post("/api/employee/location-requests", status_code=status.HTTP_201_CREATED)
+def create_employee_request(
+    data: LocationIn,
+    employee: EmployeeAccount = Depends(active_employee),
+    db: Session = Depends(db_session),
+):
+    item = LocationRequest(**data.model_dump(), employee_account_id=employee.id)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return location_request_payload(item)
+
+
+@app.get("/api/location-requests")
+def internal_requests(
+    request_status: str = "pending",
+    _: User = Depends(current_user),
+    db: Session = Depends(db_session),
+):
+    stmt = select(LocationRequest)
+    if request_status != "all":
+        stmt = stmt.where(LocationRequest.status == request_status)
+    stmt = stmt.order_by(LocationRequest.created_at.desc())
+    return [location_request_payload(x) for x in db.scalars(stmt).all()]
+
+
+@app.post("/api/location-requests/{request_id}/approve")
+def approve_location_request(
+    request_id: int,
+    data: ReviewIn,
+    user: User = Depends(current_user),
+    db: Session = Depends(db_session),
+):
+    item = db.get(LocationRequest, request_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    if item.status != "pending":
+        raise HTTPException(status_code=409, detail="הבקשה כבר טופלה")
+    location = Location(
+        category=item.category,
+        place_type=item.place_type,
+        name=item.name,
+        km=item.km,
+        waze_url=item.waze_url,
+        maps_url=item.maps_url,
+        coordinates=item.coordinates,
+        notes=item.notes,
+        created_by_id=user.id,
+    )
+    item.status = "approved"
+    item.review_note = data.note.strip()
+    item.reviewed_by_id = user.id
+    item.reviewed_at = datetime.now(timezone.utc)
+    db.add(location)
+    db.commit()
+    db.refresh(item)
+    return location_request_payload(item)
+
+
+@app.post("/api/location-requests/{request_id}/reject")
+def reject_location_request(
+    request_id: int,
+    data: ReviewIn,
+    user: User = Depends(current_user),
+    db: Session = Depends(db_session),
+):
+    item = db.get(LocationRequest, request_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
+    if item.status != "pending":
+        raise HTTPException(status_code=409, detail="הבקשה כבר טופלה")
+    item.status = "rejected"
+    item.review_note = data.note.strip()
+    item.reviewed_by_id = user.id
+    item.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(item)
+    return location_request_payload(item)
+
 
 @app.get("/api/locations")
 def list_locations(_: User = Depends(current_user), db: Session = Depends(db_session)):
