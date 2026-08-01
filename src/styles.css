@@ -88,3 +88,8 @@
 
 .app-recovery{min-height:100vh;display:grid;place-content:center;justify-items:center;gap:12px;padding:24px;text-align:center;background:#f4f7fb;color:#17213a}
 .app-recovery img{width:150px;margin-bottom:15px}.app-recovery h1,.app-recovery p{margin:0}.app-recovery p{color:var(--muted)}
+
+.employee-reset-form{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,260px) auto;align-items:end;gap:14px;margin:0 30px 24px;padding:20px;border:1px solid var(--border);border-radius:14px;background:#f8faff}
+.employee-reset-form>div{display:grid}.employee-reset-form small{color:var(--muted);margin-top:4px}.employee-reset-form input{height:46px;border:1px solid #ccd6e5;border-radius:10px;padding:0 13px;background:#fff;outline:none}
+.success-box{background:#eaf8f1;color:#137547;border:1px solid #a9dec3;border-radius:10px;padding:11px 14px;margin:0 30px 20px}
+@media(max-width:700px){.employee-reset-form{grid-template-columns:1fr;margin:0 20px 20px}.employee-reset-form .secondary{width:100%}}
