@@ -332,7 +332,7 @@ def location_request_payload(item: LocationRequest) -> LocationRequestOut:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "employee_auth_version": 2}
+    return {"status": "ok", "employee_auth_version": 3}
 
 @app.post("/api/auth/login")
 def login(data: LoginIn, db: Session = Depends(db_session)):
