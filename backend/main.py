@@ -29,7 +29,16 @@ BOOTSTRAP_USERNAME = os.getenv("BOOTSTRAP_USERNAME", "owner")
 BOOTSTRAP_PASSWORD = os.getenv("BOOTSTRAP_PASSWORD", "ChangeMe123!")
 ACCESS_TOKEN_HOURS = int(os.getenv("ACCESS_TOKEN_HOURS", "12"))
 CORS_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
-EMPLOYEE_DIRECTORY_URL = os.getenv("EMPLOYEE_DIRECTORY_URL", "").rstrip("/")
+_employee_directory_raw = os.getenv("EMPLOYEE_DIRECTORY_URL", "").strip().rstrip("/")
+_employee_directory_parts = urllib.parse.urlsplit(_employee_directory_raw)
+_employee_directory_path = re.sub(r"/+", "/", _employee_directory_parts.path)
+EMPLOYEE_DIRECTORY_URL = urllib.parse.urlunsplit((
+    _employee_directory_parts.scheme,
+    _employee_directory_parts.netloc,
+    _employee_directory_path,
+    _employee_directory_parts.query,
+    _employee_directory_parts.fragment,
+))
 EMPLOYEE_DIRECTORY_KEY = os.getenv("EMPLOYEE_DIRECTORY_KEY", "")
 EMPLOYEE_INITIAL_PASSWORD = "Aa1234"
 
@@ -332,7 +341,7 @@ def location_request_payload(item: LocationRequest) -> LocationRequestOut:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "employee_auth_version": 5, "employee_directory_host": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).netloc, "employee_directory_path": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).path}
+    return {"status": "ok", "employee_auth_version": 6, "employee_directory_host": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).netloc, "employee_directory_path": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).path}
 
 @app.post("/api/auth/login")
 def login(data: LoginIn, db: Session = Depends(db_session)):
