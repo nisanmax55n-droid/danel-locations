@@ -26,7 +26,7 @@ async function request<T>(path:string, options:RequestInit={}, token?:string):Pr
 }
 
 function App() {
-  const [session,setSession]=useState<Session|null>(()=>{try{return JSON.parse(localStorage.getItem('danel_location_session')||'null')}catch{return null}});
+  const [session,setSession]=useState<Session|null>(()=>{try{return JSON.parse(localStorage.getItem('danel_location_session')||sessionStorage.getItem('danel_location_session')||'null')}catch{return null}});
   const [items,setItems]=useState<LocationItem[]>([]);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState('');
@@ -37,8 +37,8 @@ function App() {
   const [usersOpen,setUsersOpen]=useState(false);
 
   useEffect(()=>{if(!session)return; setLoading(true); request<LocationItem[]>('/locations',{},session.token).then(setItems).catch(e=>{setError(e.message);logout()}).finally(()=>setLoading(false));},[session?.token]);
-  const saveSession=(next:Session)=>{localStorage.setItem('danel_location_session',JSON.stringify(next));setSession(next)};
-  const logout=()=>{localStorage.removeItem('danel_location_session');setSession(null);setItems([])};
+  const saveSession=(next:Session,remember=true)=>{localStorage.removeItem('danel_location_session');sessionStorage.removeItem('danel_location_session');(remember?localStorage:sessionStorage).setItem('danel_location_session',JSON.stringify(next));setSession(next)};
+  const logout=()=>{localStorage.removeItem('danel_location_session');sessionStorage.removeItem('danel_location_session');setSession(null);setItems([])};
 
   const filtered=useMemo(()=>items.filter(item=>item.category===category&&(placeType==='all'||item.place_type===placeType)&&`${item.name} ${item.km} ${item.notes}`.toLowerCase().includes(query.toLowerCase())),[items,category,placeType,query]);
   if(!session) return <Login onLogin={saveSession}/>;
@@ -58,7 +58,7 @@ function App() {
   }
 
   return <main className="app-shell">
-    <header className="topbar"><div className="brand"><div className="brand-mark"><MapPin/></div><div><strong>מאגר מיקומים</strong><span>קבוצת דנאל</span></div></div><div className="user-box"><span>{session.user.full_name}</span><small>{session.user.role==='owner'?'בעלים':'מנהל'}</small>{session.user.role==='owner'&&<button onClick={()=>setUsersOpen(true)} title="ניהול משתמשים"><UserCog size={18}/></button>}<button onClick={logout} title="יציאה"><LogOut size={18}/></button></div></header>
+    <header className="topbar"><div className="brand"><img src="/danel-logo.svg" alt="קבוצת דנאל" className="header-logo"/><div><strong>מאגר מיקומים</strong><span>מרכז המיקומים התפעולי</span></div></div><div className="user-box"><span>{session.user.full_name}</span><small>{session.user.role==='owner'?'בעלים':'מנהל'}</small>{session.user.role==='owner'&&<button onClick={()=>setUsersOpen(true)} title="ניהול משתמשים"><UserCog size={18}/></button>}<button onClick={logout} title="יציאה"><LogOut size={18}/></button></div></header>
     <section className="hero"><div><p className="eyebrow">מרכז מיקומים תפעולי</p><h1>אתרי עבודה ונקודות דיווח</h1><p>כל התחנות, הקטעים, הקילומטרים וקישורי הניווט במקום אחד.</p></div><button className="primary" onClick={()=>setEditing(blankLocation(category))}><Plus size={18}/> הוספת מיקום</button></section>
     <section className="stats"><Stat icon={<Building2/>} label="אתרי עבודה" value={items.filter(x=>x.category==='work_site').length}/><Stat icon={<Navigation/>} label="נקודות דיווח" value={items.filter(x=>x.category==='reporting_point').length}/><Stat icon={<MapPin/>} label="תחנות" value={items.filter(x=>x.place_type==='station').length}/><Stat icon={<Users/>} label="קטעים" value={items.filter(x=>x.place_type==='segment').length}/></section>
     <section className="panel"><div className="tabs"><button className={category==='work_site'?'active':''} onClick={()=>setCategory('work_site')}>אתרי עבודה</button><button className={category==='reporting_point'?'active':''} onClick={()=>setCategory('reporting_point')}>נקודות דיווח</button></div><div className="toolbar"><label className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="חיפוש לפי שם, ק״מ או הערה"/></label><select value={placeType} onChange={e=>setPlaceType(e.target.value as PlaceType|'all')}><option value="all">כל הסוגים</option><option value="station">תחנות</option><option value="segment">קטעים</option></select></div>
@@ -70,16 +70,53 @@ function App() {
   </main>;
 }
 
-function Login({onLogin}:{onLogin:(session:Session)=>void}){
-  const[username,setUsername]=useState('');const[password,setPassword]=useState('');const[error,setError]=useState('');const[loading,setLoading]=useState(false);
-  async function submit(e:FormEvent){e.preventDefault();setLoading(true);setError('');try{onLogin(await request<Session>('/auth/login',{method:'POST',body:JSON.stringify({username,password})}))}catch(e){setError((e as Error).message)}finally{setLoading(false)}}
-  return <main className="login-shell"><section className="login-brand"><div className="brand-glow"/><div className="large-pin"><MapPin/></div><div><p className="eyebrow light">מרכז המיקומים התפעולי</p><h1>מאגר<br/>מיקומים</h1><p>אתרי עבודה, נקודות דיווח, תחנות וקטעים — מסודרים ונגישים מכל מכשיר.</p></div><div className="brand-features"><span><ShieldCheck/> כניסה מאובטחת</span><span><Navigation/> ניווט מהיר</span><span><MapPin/> מיקומים מדויקים</span></div></section><section className="login-panel"><form className="login-card" onSubmit={submit}><p className="eyebrow">ברוכים הבאים</p><h2>כניסה למערכת</h2><p className="muted">הזינו את פרטי הזיהוי כדי להיכנס למאגר.</p><label>שם משתמש<input value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" required/></label><label>סיסמה<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/></label>{error&&<div className="error-box">{error}</div>}<button className="primary wide" disabled={loading}>{loading?'מתחבר...':'כניסה למערכת'} <ChevronLeft size={18}/></button></form></section></main>
+function Login({onLogin}:{onLogin:(session:Session,remember?:boolean)=>void}){
+  const[username,setUsername]=useState('');
+  const[password,setPassword]=useState('');
+  const[remember,setRemember]=useState(true);
+  const[error,setError]=useState('');
+  const[loading,setLoading]=useState(false);
+  async function submit(e:FormEvent){
+    e.preventDefault();setLoading(true);setError('');
+    try{const next=await request<Session>('/auth/login',{method:'POST',body:JSON.stringify({username,password})});onLogin(next,remember)}
+    catch(e){setError((e as Error).message)}finally{setLoading(false)}
+  }
+  return <main className="login-shell">
+    <section className="login-brand">
+      <div className="brand-glow"/>
+      <img src="/danel-logo.svg" alt="קבוצת דנאל" className="login-logo"/>
+      <div className="login-copy">
+        <p className="eyebrow light">מרכז המיקומים התפעולי</p>
+        <h1>מאגר<br/>מיקומים</h1>
+        <p className="login-lead">כל אתרי העבודה, נקודות הדיווח, התחנות והקטעים במקום אחד — מסודרים, מעודכנים ונגישים מכל מכשיר.</p>
+      </div>
+      <div className="brand-features">
+        <span><ShieldCheck size={20}/> כניסה מאובטחת</span>
+        <span><Navigation size={20}/> ניווט מהיר</span>
+        <span><MapPin size={20}/> מיקומים מדויקים</span>
+      </div>
+    </section>
+    <section className="login-panel">
+      <form className="login-card" onSubmit={submit}>
+        <div className="mobile-logo"><img src="/danel-logo.svg" alt="קבוצת דנאל"/><strong>מאגר מיקומים</strong></div>
+        <p className="eyebrow">ברוכים הבאים</p>
+        <h2>כניסה למערכת</h2>
+        <p className="muted">הזינו את פרטי הזיהוי כדי להיכנס למאגר.</p>
+        <label>שם משתמש<input value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" required/></label>
+        <label>סיסמה<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required/></label>
+        <label className="remember-row"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/><span>זכור אותי במכשיר הזה</span></label>
+        {error&&<div className="error-box">{error}</div>}
+        <button className="primary wide" disabled={loading}>{loading?'מתחבר...':'כניסה למערכת'} {!loading&&<ChevronLeft size={19}/>}</button>
+        <p className="help-note">הכניסה למערכת מיועדת למשתמשים מורשים בלבד.</p>
+      </form>
+    </section>
+  </main>
 }
 
 function ChangePassword({session,onChanged,onLogout}:{session:Session;onChanged:(s:Session)=>void;onLogout:()=>void}){
  const[current,setCurrent]=useState('');const[next,setNext]=useState('');const[confirmPassword,setConfirm]=useState('');const[error,setError]=useState('');
  async function submit(e:FormEvent){e.preventDefault();if(next!==confirmPassword){setError('אימות הסיסמה אינו תואם');return}try{onChanged(await request<Session>('/auth/change-password',{method:'POST',body:JSON.stringify({current_password:current,new_password:next})},session.token))}catch(e){setError((e as Error).message)}}
- return <main className="login-shell"><section className="login-brand"><div className="large-pin"><ShieldCheck/></div><h1>אבטחת<br/>החשבון</h1></section><section className="login-panel"><form className="login-card" onSubmit={submit}><h2>החלפת סיסמה ראשונית</h2><p className="muted">לפני הכניסה יש לבחור סיסמה אישית בת 10 תווים לפחות.</p><label>סיסמה נוכחית<input type="password" value={current} onChange={e=>setCurrent(e.target.value)} required/></label><label>סיסמה חדשה<input type="password" minLength={10} value={next} onChange={e=>setNext(e.target.value)} required/></label><label>אימות סיסמה<input type="password" minLength={10} value={confirmPassword} onChange={e=>setConfirm(e.target.value)} required/></label>{error&&<div className="error-box">{error}</div>}<button className="primary wide">שמירת סיסמה</button><button type="button" className="secondary wide" onClick={onLogout}>יציאה</button></form></section></main>
+ return <main className="login-shell"><section className="login-brand"><img src="/danel-logo.svg" alt="קבוצת דנאל" className="login-logo"/><div className="login-copy"><p className="eyebrow light">אבטחת החשבון</p><h1>החלפת<br/>סיסמה</h1><p className="login-lead">הגנה על פרטי המשתמש ושמירה על גישה מאובטחת למאגר.</p></div><div className="brand-features"><span><ShieldCheck size={20}/> כניסה מאובטחת</span></div></section><section className="login-panel"><form className="login-card" onSubmit={submit}><h2>החלפת סיסמה ראשונית</h2><p className="muted">לפני הכניסה יש לבחור סיסמה אישית בת 10 תווים לפחות.</p><label>סיסמה נוכחית<input type="password" value={current} onChange={e=>setCurrent(e.target.value)} required/></label><label>סיסמה חדשה<input type="password" minLength={10} value={next} onChange={e=>setNext(e.target.value)} required/></label><label>אימות סיסמה<input type="password" minLength={10} value={confirmPassword} onChange={e=>setConfirm(e.target.value)} required/></label>{error&&<div className="error-box">{error}</div>}<button className="primary wide">שמירת סיסמה</button><button type="button" className="secondary wide" onClick={onLogout}>יציאה</button></form></section></main>
 }
 
 function LocationModal({item,onClose,onSave}:{item:LocationItem|LocationDraft;onClose:()=>void;onSave:(i:LocationItem|LocationDraft)=>void}){
