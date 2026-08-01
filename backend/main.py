@@ -332,7 +332,7 @@ def location_request_payload(item: LocationRequest) -> LocationRequestOut:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "employee_auth_version": 4, "employee_directory_host": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).netloc}
+    return {"status": "ok", "employee_auth_version": 5, "employee_directory_host": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).netloc, "employee_directory_path": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).path}
 
 @app.post("/api/auth/login")
 def login(data: LoginIn, db: Session = Depends(db_session)):
