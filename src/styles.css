@@ -85,3 +85,6 @@
 .portal-header-link{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:39px;padding:0 13px;border:1px solid var(--border);border-radius:10px;background:#f8faff;color:var(--brand);font-weight:700;font-size:13px;text-decoration:none;white-space:nowrap}
 .portal-header-link:hover{background:var(--brand-soft);border-color:#b9c8e0}
 @media(max-width:700px){.portal-header-link{width:39px;padding:0}.portal-header-link span{display:none}}
+
+.app-recovery{min-height:100vh;display:grid;place-content:center;justify-items:center;gap:12px;padding:24px;text-align:center;background:#f4f7fb;color:#17213a}
+.app-recovery img{width:150px;margin-bottom:15px}.app-recovery h1,.app-recovery p{margin:0}.app-recovery p{color:var(--muted)}
