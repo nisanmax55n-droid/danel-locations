@@ -51,3 +51,33 @@
 @media(max-width:1540px){.hero,.stats,.panel{margin-left:24px;margin-right:24px}}
 @media(max-width:1000px){.login-shell{grid-template-columns:1fr}.login-brand{display:none}.login-panel{min-height:100vh;background:#f4f7fb;padding:24px}.mobile-logo{display:flex;align-items:center;gap:13px;margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid var(--border)}.mobile-logo img{width:95px}.stats{grid-template-columns:1fr 1fr}.cards{grid-template-columns:1fr 1fr}}
 @media(max-width:700px){.topbar{height:auto;min-height:74px;padding:10px 14px}.header-logo{width:72px}.brand span,.user-box>span,.user-box small{display:none}.hero{margin:16px 14px;padding:25px;align-items:flex-start;flex-direction:column;border-radius:17px}.hero h1{font-size:27px}.stats{margin:0 14px 16px;grid-template-columns:1fr 1fr;gap:10px}.stat{padding:14px}.panel{margin:0 14px 25px}.tabs{padding:10px;display:grid;grid-template-columns:1fr 1fr}.tabs button{min-width:0}.toolbar{flex-direction:column;padding:14px}.search,.toolbar select{width:100%}.cards{grid-template-columns:1fr;padding:14px}.login-card{padding:27px}.form-grid{grid-template-columns:1fr;padding:22px 20px}.form-grid .full{grid-column:auto}.modal-backdrop{padding:10px}.modal{max-height:calc(100vh - 20px);border-radius:15px}.modal-head{padding:20px}.modal-actions{padding:16px 20px}.user-list{padding:0 20px 22px}.user-row{grid-template-columns:1fr auto}.user-row .secondary{grid-column:1/-1}}
+
+
+/* Employee portal and approvals */
+.three-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}
+.tab-count{display:inline-grid;place-items:center;min-width:24px;height:24px;margin-inline-start:7px;padding:0 7px;border-radius:20px;background:#fff;color:var(--brand);font-size:12px}
+.portal-link{display:block;text-align:center;margin-top:20px;color:var(--brand);font-weight:700;text-decoration:none}
+.portal-link:hover{text-decoration:underline}
+.employee-hero{background:linear-gradient(145deg,#0d2e7a,#1746b8 62%,#2460d9)}
+.approval-list{display:grid;gap:15px;padding:22px}
+.approval-card{display:grid;grid-template-columns:1fr auto;align-items:center;gap:24px;padding:22px;border:1px solid var(--border);border-radius:16px;background:#fff;box-shadow:0 5px 18px rgba(29,48,87,.04)}
+.approval-card h3{font-size:21px;margin:14px 0 7px}.approval-card p{margin:6px 0;color:var(--muted)}
+.request-meta{display:flex;align-items:center;gap:13px;flex-wrap:wrap;color:var(--muted);font-size:13px}.request-meta>span{display:inline-flex;align-items:center;gap:5px}
+.review-actions{display:flex;gap:9px}.review-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;border-radius:10px;padding:11px 17px;font-weight:800}
+.review-actions .approve{border:1px solid #a9dec3;background:#edf9f3;color:#137547}.review-actions .reject{border:1px solid #ffc6ce;background:#fff2f4;color:#b2293d}
+.status-pill{display:inline-flex;padding:6px 11px;border-radius:20px;font-weight:800}.status-pill.pending{background:#fff4d8;color:#996400}.status-pill.approved{background:#eaf8f1;color:#137547}.status-pill.rejected{background:#fff0f2;color:#b2293d}
+.my-request{grid-template-columns:1fr}
+
+@media(max-width:700px){
+  .three-tabs{display:grid;grid-template-columns:1fr 1fr;overflow:visible}
+  .three-tabs button:last-child{grid-column:1/-1}
+  .employee-hero .primary{width:100%}
+  .approval-list{padding:13px}
+  .approval-card{grid-template-columns:1fr;padding:17px;gap:16px}
+  .review-actions{display:grid;grid-template-columns:1fr 1fr}
+  .review-actions button{width:100%}
+  .employee-shell .location-card{padding:17px}
+  .employee-shell .nav-actions{display:grid;grid-template-columns:1fr}
+  .employee-shell .nav-actions a{min-height:46px;justify-content:center;font-size:15px}
+  .login-card .portal-link{min-height:44px;display:grid;place-items:center}
+}
