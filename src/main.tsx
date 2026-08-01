@@ -11,7 +11,7 @@ type Session = { token:string; user:User };
 type LocationItem = { id:number; category:Category; place_type:PlaceType; name:string; km:string; waze_url:string; maps_url:string; coordinates:string; notes:string; created_at:string; updated_at:string };
 type LocationDraft = Omit<LocationItem,'id'|'created_at'|'updated_at'>;
 
-const API = '/api';
+const API = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 const blankLocation = (category:Category):LocationDraft => ({category,place_type:'segment',name:'',km:'',waze_url:'',maps_url:'',coordinates:'',notes:''});
 
 async function request<T>(path:string, options:RequestInit={}, token?:string):Promise<T> {
