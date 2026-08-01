@@ -399,9 +399,13 @@ def employee_login(data: EmployeeLoginIn, db: Session = Depends(db_session)):
     employee.worker_ref = int(worker["worker_id"])
     employee.full_name = str(worker["full_name"]).strip()
     employee.is_active = True
-    if not password_hash.verify(data.password, employee.password_digest):
+    password_is_valid = password_hash.verify(data.password, employee.password_digest)
+    initial_password_recovery = employee.must_change_password and data.password == EMPLOYEE_INITIAL_PASSWORD
+    if not password_is_valid and not initial_password_recovery:
         db.rollback()
         raise HTTPException(status_code=401, detail="תעודת הזהות או הסיסמה שגויות")
+    if initial_password_recovery and not password_is_valid:
+        employee.password_digest = password_hash.hash(EMPLOYEE_INITIAL_PASSWORD)
     employee.last_login_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(employee)
