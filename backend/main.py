@@ -179,6 +179,10 @@ class LocationRequestOut(LocationIn):
 class ReviewIn(BaseModel):
     note: str = Field(default="", max_length=2000)
 
+
+class EmployeeResetIn(BaseModel):
+    id_number: str = Field(min_length=5, max_length=32)
+
 app = FastAPI(title="Danel Locations API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -524,6 +528,24 @@ def reject_location_request(
     db.commit()
     db.refresh(item)
     return location_request_payload(item)
+
+
+@app.post("/api/employee-accounts/reset-password")
+def reset_employee_password(
+    data: EmployeeResetIn,
+    _: User = Depends(owner_only),
+    db: Session = Depends(db_session),
+):
+    id_number = normalize_id_number(data.id_number)
+    employee = db.scalar(select(EmployeeAccount).where(EmployeeAccount.id_number == id_number))
+    if not employee:
+        raise HTTPException(status_code=404, detail="לעובד עדיין לא נוצר חשבון במאגר המיקומים")
+    employee.password_digest = password_hash.hash(EMPLOYEE_INITIAL_PASSWORD)
+    employee.must_change_password = True
+    employee.is_active = True
+    db.commit()
+    db.refresh(employee)
+    return employee_payload(employee)
 
 
 @app.get("/api/locations")
