@@ -15,18 +15,40 @@
 - חיפוש וסינון והתאמה מלאה לטלפון ולמחשב.
 - FastAPI, React, PostgreSQL ו־Docker.
 
-## פריסה ל־Railway
+## פריסה ל־Railway בשלושה שירותים
 
-1. יש לשנות את המאגר ל־Private לפני הכנסת מידע אמיתי.
-2. ליצור Project חדש ב־Railway מתוך המאגר הזה.
-3. להוסיף PostgreSQL לפרויקט.
-4. בשירות האפליקציה להגדיר:
-   - `SECRET_KEY` — מחרוזת אקראית ארוכה.
-   - `BOOTSTRAP_USERNAME` — שם משתמש זמני לבעלים.
-   - `BOOTSTRAP_PASSWORD` — סיסמה זמנית חזקה.
-5. Railway מחבר אוטומטית את `DATABASE_URL` משירות PostgreSQL.
-6. לפרוס ולפתוח את הדומיין שנוצר.
-7. בכניסה הראשונה להחליף מיד את הסיסמה הראשונית.
+שמות השירותים המומלצים: `Postgres`, `Backend`, `Frontend`.
+
+### Backend
+
+חבר את אותו מאגר GitHub והגדר את המשתנים:
+
+- `RAILWAY_DOCKERFILE_PATH=Dockerfile.backend`
+- `DATABASE_URL=${{Postgres.DATABASE_URL}}`
+- `SECRET_KEY` — מחרוזת אקראית ארוכה.
+- `BOOTSTRAP_USERNAME=owner`
+- `BOOTSTRAP_PASSWORD` — סיסמה ראשונית חזקה.
+- `ACCESS_TOKEN_HOURS=12`
+- `CORS_ORIGINS=https://${{Frontend.RAILWAY_PUBLIC_DOMAIN}}`
+
+צור לשירות Backend דומיין ציבורי. אין ליצור דומיין ציבורי ל־Postgres.
+
+### Frontend
+
+חבר את אותו מאגר GitHub והגדר:
+
+- `RAILWAY_DOCKERFILE_PATH=Dockerfile.frontend`
+- `VITE_API_URL=https://${{Backend.RAILWAY_PUBLIC_DOMAIN}}/api`
+
+צור לשירות Frontend דומיין ציבורי. לאחר שינוי `VITE_API_URL` יש לבצע Redeploy, מפני שזה משתנה שנצרב בזמן בניית Vite.
+
+### סדר הפריסה
+
+1. פרוס Postgres.
+2. פרוס Backend וצור לו דומיין.
+3. פרוס Frontend וצור לו דומיין.
+4. בצע Redeploy ל־Backend ול־Frontend לאחר שכל משתני ההפניה נשמרו.
+5. בדוק `https://<backend-domain>/api/health`, ולאחר מכן פתח את דומיין ה־Frontend.
 
 ## הרצה מקומית
 
