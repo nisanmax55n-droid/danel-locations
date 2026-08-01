@@ -31,7 +31,7 @@ ACCESS_TOKEN_HOURS = int(os.getenv("ACCESS_TOKEN_HOURS", "12"))
 CORS_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
 EMPLOYEE_DIRECTORY_URL = os.getenv("EMPLOYEE_DIRECTORY_URL", "").rstrip("/")
 EMPLOYEE_DIRECTORY_KEY = os.getenv("EMPLOYEE_DIRECTORY_KEY", "")
-EMPLOYEE_INITIAL_PASSWORD = os.getenv("EMPLOYEE_INITIAL_PASSWORD", "Aa1234")
+EMPLOYEE_INITIAL_PASSWORD = "Aa1234"
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
@@ -539,10 +539,22 @@ def reset_employee_password(
     id_number = normalize_id_number(data.id_number)
     employee = db.scalar(select(EmployeeAccount).where(EmployeeAccount.id_number == id_number))
     if not employee:
-        raise HTTPException(status_code=404, detail="לעובד עדיין לא נוצר חשבון במאגר המיקומים")
-    employee.password_digest = password_hash.hash(EMPLOYEE_INITIAL_PASSWORD)
-    employee.must_change_password = True
-    employee.is_active = True
+        worker = directory_worker(id_number)
+        if not worker.get("is_active", False):
+            raise HTTPException(status_code=403, detail="העובד אינו פעיל במאגר העובדים")
+        employee = EmployeeAccount(
+            worker_ref=int(worker["worker_id"]),
+            id_number=id_number,
+            full_name=str(worker["full_name"]).strip(),
+            password_digest=password_hash.hash(EMPLOYEE_INITIAL_PASSWORD),
+            must_change_password=True,
+            is_active=True,
+        )
+        db.add(employee)
+    else:
+        employee.password_digest = password_hash.hash(EMPLOYEE_INITIAL_PASSWORD)
+        employee.must_change_password = True
+        employee.is_active = True
     db.commit()
     db.refresh(employee)
     return employee_payload(employee)
