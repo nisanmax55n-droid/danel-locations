@@ -109,9 +109,15 @@ def build_navigation_links(lat: float, lng: float) -> dict[str, str]:
 
 def normalize_navigation_payload(payload: dict[str, Any], *, strict: bool = False) -> dict[str, Any]:
     normalized = dict(payload)
+    navigation_url = str(normalized.pop("navigation_url", "") or "").strip()
     coordinates_value = str(normalized.get("coordinates") or "").strip()
     waze_url = str(normalized.get("waze_url") or "").strip()
     maps_url = str(normalized.get("maps_url") or "").strip()
+    if navigation_url and not waze_url and not maps_url:
+        if "waze." in urllib.parse.urlsplit(navigation_url).netloc.lower():
+            waze_url = navigation_url
+        else:
+            maps_url = navigation_url
 
     coordinates = extract_coordinates(coordinates_value)
     if not coordinates:
@@ -120,7 +126,7 @@ def normalize_navigation_payload(payload: dict[str, Any], *, strict: bool = Fals
             if coordinates:
                 break
 
-    has_navigation_input = bool(coordinates_value or waze_url or maps_url)
+    has_navigation_input = bool(coordinates_value or waze_url or maps_url or navigation_url)
     if not coordinates:
         if strict and has_navigation_input:
             raise ValueError("לא ניתן לחלץ נקודת יעד מהקישור. יש להדביק קישור שיתוף מלא של Google Maps או Waze.")

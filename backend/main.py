@@ -153,6 +153,10 @@ class LocationIn(BaseModel):
             raise ValueError("פורמט הק״מ צריך להיות 145+000 או טווח 145+000 - 146+500")
         return value
 
+
+class LocationWriteIn(LocationIn):
+    allow_duplicate: bool = False
+
 class LocationOut(LocationIn):
     id: int
     created_at: datetime
@@ -187,6 +191,7 @@ class LocationRequestOut(LocationIn):
 
 class ReviewIn(BaseModel):
     note: str = Field(default="", max_length=2000)
+    allow_duplicate: bool = False
 
 
 class EmployeeResetIn(BaseModel):
@@ -339,6 +344,78 @@ def location_request_payload(item: LocationRequest) -> LocationRequestOut:
         reviewed_at=item.reviewed_at,
     )
 
+
+def _normalized_location_name(value: str) -> str:
+    return re.sub(r"[^0-9a-z\u0590-\u05ff]+", "", value.casefold())
+
+
+def _normalized_km(value: str) -> str:
+    return re.sub(r"\s+", "", value or "")
+
+
+def _coordinate_key(value: str) -> tuple[float, float] | None:
+    try:
+        lat_text, lng_text = (part.strip() for part in value.split(",", 1))
+        return round(float(lat_text), 6), round(float(lng_text), 6)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def find_location_duplicates(
+    db: Session,
+    data: LocationIn | LocationRequest,
+    *,
+    exclude_location_id: int | None = None,
+) -> list[dict]:
+    incoming_name = _normalized_location_name(data.name)
+    incoming_km = _normalized_km(data.km)
+    incoming_coordinates = _coordinate_key(data.coordinates)
+    duplicates: list[dict] = []
+
+    for location in db.scalars(select(Location)).all():
+        if exclude_location_id is not None and location.id == exclude_location_id:
+            continue
+        reasons: list[str] = []
+        if (
+            incoming_name
+            and incoming_km
+            and incoming_name == _normalized_location_name(location.name)
+            and incoming_km == _normalized_km(location.km)
+        ):
+            reasons.append("אותו שם ואותו ק״מ רכבתי")
+        if incoming_coordinates and incoming_coordinates == _coordinate_key(location.coordinates):
+            reasons.append("הקישור מוביל לאותה נקודה")
+        if reasons:
+            duplicates.append({
+                "id": location.id,
+                "name": location.name,
+                "km": location.km,
+                "category": location.category,
+                "place_type": location.place_type,
+                "waze_url": location.waze_url,
+                "maps_url": location.maps_url,
+                "reasons": reasons,
+            })
+    return duplicates
+
+
+def reject_unconfirmed_duplicate(
+    db: Session,
+    data: LocationIn | LocationRequest,
+    *,
+    allow_duplicate: bool,
+    exclude_location_id: int | None = None,
+) -> None:
+    if allow_duplicate:
+        return
+    duplicates = find_location_duplicates(db, data, exclude_location_id=exclude_location_id)
+    if duplicates:
+        raise HTTPException(status_code=409, detail={
+            "code": "duplicate_location",
+            "message": "מצאנו מיקום דומה שכבר קיים במאגר",
+            "matches": duplicates,
+        })
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "employee_auth_version": 6, "employee_directory_host": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).netloc, "employee_directory_path": urllib.parse.urlparse(EMPLOYEE_DIRECTORY_URL).path}
@@ -461,11 +538,15 @@ def employee_requests(employee: EmployeeAccount = Depends(active_employee), db: 
 
 @app.post("/api/employee/location-requests", status_code=status.HTTP_201_CREATED)
 def create_employee_request(
-    data: LocationIn,
+    data: LocationWriteIn,
     employee: EmployeeAccount = Depends(active_employee),
     db: Session = Depends(db_session),
 ):
-    item = LocationRequest(**data.model_dump(), employee_account_id=employee.id)
+    location_data = data.model_dump(exclude={"allow_duplicate"})
+    if not location_data["waze_url"] and not location_data["maps_url"]:
+        raise HTTPException(status_code=422, detail="יש להדביק קישור שיתוף של Google Maps או Waze")
+    reject_unconfirmed_duplicate(db, data, allow_duplicate=data.allow_duplicate)
+    item = LocationRequest(**location_data, employee_account_id=employee.id)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -497,6 +578,7 @@ def approve_location_request(
         raise HTTPException(status_code=404, detail="הבקשה לא נמצאה")
     if item.status != "pending":
         raise HTTPException(status_code=409, detail="הבקשה כבר טופלה")
+    reject_unconfirmed_duplicate(db, item, allow_duplicate=data.allow_duplicate)
     location = Location(
         category=item.category,
         place_type=item.place_type,
@@ -575,19 +657,21 @@ def list_locations(_: User = Depends(current_user), db: Session = Depends(db_ses
     return [location_payload(x) for x in db.scalars(stmt).all()]
 
 @app.post("/api/locations", status_code=status.HTTP_201_CREATED)
-def create_location(data: LocationIn, user: User = Depends(current_user), db: Session = Depends(db_session)):
-    item = Location(**data.model_dump(), created_by_id=user.id)
+def create_location(data: LocationWriteIn, user: User = Depends(current_user), db: Session = Depends(db_session)):
+    reject_unconfirmed_duplicate(db, data, allow_duplicate=data.allow_duplicate)
+    item = Location(**data.model_dump(exclude={"allow_duplicate"}), created_by_id=user.id)
     db.add(item)
     db.commit()
     db.refresh(item)
     return location_payload(item)
 
 @app.put("/api/locations/{location_id}")
-def update_location(location_id: int, data: LocationIn, _: User = Depends(current_user), db: Session = Depends(db_session)):
+def update_location(location_id: int, data: LocationWriteIn, _: User = Depends(current_user), db: Session = Depends(db_session)):
     item = db.get(Location, location_id)
     if not item:
         raise HTTPException(status_code=404, detail="המיקום לא נמצא")
-    for key, value in data.model_dump().items():
+    reject_unconfirmed_duplicate(db, data, allow_duplicate=data.allow_duplicate, exclude_location_id=location_id)
+    for key, value in data.model_dump(exclude={"allow_duplicate"}).items():
         setattr(item, key, value)
     item.updated_at = datetime.now(timezone.utc)
     db.commit()

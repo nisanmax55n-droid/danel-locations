@@ -1,6 +1,6 @@
 import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Building2, Check, ChevronLeft, Clock3, ExternalLink, FileCheck2, LogOut, MapPin, Navigation, Pencil, Plus, Search, Send, ShieldCheck, Trash2, UserCog, Users, X } from 'lucide-react';
+import { AlertTriangle, Building2, Check, ChevronLeft, Clock3, ExternalLink, FileCheck2, LogOut, MapPin, Navigation, Pencil, Plus, Search, Send, ShieldCheck, Trash2, UserCog, Users, X } from 'lucide-react';
 import './styles.css';
 
 type Role = 'owner' | 'manager';
@@ -13,6 +13,14 @@ type EmployeeSession = { token:string; employee:Employee };
 type LocationItem = { id:number; category:Category; place_type:PlaceType; name:string; km:string; waze_url:string; maps_url:string; coordinates:string; notes:string; created_at:string; updated_at:string };
 type LocationDraft = Omit<LocationItem,'id'|'created_at'|'updated_at'>;
 type LocationRequest = LocationDraft & { id:number; status:'pending'|'approved'|'rejected'; review_note:string; submitted_by_name:string; created_at:string; reviewed_at:string|null };
+type DuplicateMatch = Pick<LocationItem,'id'|'name'|'km'|'category'|'place_type'|'waze_url'|'maps_url'> & { reasons:string[] };
+type ApiDetail = string|{code?:string;message?:string;matches?:DuplicateMatch[]};
+
+class ApiError extends Error {
+  status:number;
+  detail:ApiDetail;
+  constructor(status:number,detail:ApiDetail){super(typeof detail==='string'?detail:detail.message||'אירעה שגיאה');this.status=status;this.detail=detail}
+}
 
 const API = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 const blankLocation = (category:Category):LocationDraft => ({category,place_type:'segment',name:'',km:'',waze_url:'',maps_url:'',coordinates:'',notes:''});
@@ -22,9 +30,9 @@ const typeName=(value:PlaceType)=>value==='station'?'תחנה':'קטע';
 async function request<T>(path:string, options:RequestInit={}, token?:string):Promise<T> {
   const response = await fetch(`${API}${path}`, { ...options, headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{ }),...(options.headers||{})} });
   if (!response.ok) {
-    let message='אירעה שגיאה';
-    try { const body=await response.json(); message=body.detail||message; } catch { /* ignore */ }
-    throw new Error(message);
+    let detail:ApiDetail='אירעה שגיאה';
+    try { const body=await response.json(); detail=body.detail||detail; } catch { /* ignore */ }
+    throw new ApiError(response.status,detail);
   }
   if (response.status===204) return undefined as T;
   return response.json();
@@ -41,6 +49,7 @@ function InternalApp() {
   const [query,setQuery]=useState('');
   const [editing,setEditing]=useState<LocationItem|LocationDraft|null>(null);
   const [usersOpen,setUsersOpen]=useState(false);
+  const [approvalDuplicate,setApprovalDuplicate]=useState<{id:number;matches:DuplicateMatch[]}|null>(null);
 
   const logout=()=>{localStorage.removeItem('danel_location_session');sessionStorage.removeItem('danel_location_session');setSession(null);setItems([])};
   const loadAll=()=>{if(!session)return;setLoading(true);Promise.all([request<LocationItem[]>('/locations',{},session.token),request<LocationRequest[]>('/location-requests?request_status=all',{},session.token)]).then(([locations,pending])=>{setItems(locations);setRequests(pending)}).catch(e=>{setError(e.message);logout()}).finally(()=>setLoading(false))};
@@ -51,14 +60,14 @@ function InternalApp() {
   if(session.user.must_change_password) return <InternalPassword session={session} onChanged={saveSession} onLogout={logout}/>;
   const activeSession=session;
 
-  async function saveLocation(draft:LocationDraft|LocationItem){
-    try{if('id' in draft){const updated=await request<LocationItem>(`/locations/${draft.id}`,{method:'PUT',body:JSON.stringify(draft)},activeSession.token);setItems(items.map(x=>x.id===updated.id?updated:x))}
-    else{const created=await request<LocationItem>('/locations',{method:'POST',body:JSON.stringify(draft)},activeSession.token);setItems([...items,created])}setEditing(null)}catch(e){setError((e as Error).message)}
+  async function saveLocation(draft:LocationDraft|LocationItem,allowDuplicate=false){
+    try{const payload={...draft,allow_duplicate:allowDuplicate};if('id' in draft){const updated=await request<LocationItem>(`/locations/${draft.id}`,{method:'PUT',body:JSON.stringify(payload)},activeSession.token);setItems(items.map(x=>x.id===updated.id?updated:x))}
+    else{const created=await request<LocationItem>('/locations',{method:'POST',body:JSON.stringify(payload)},activeSession.token);setItems([...items,created])}setEditing(null)}catch(e){if(e instanceof ApiError&&typeof e.detail!=='string'&&e.detail.code==='duplicate_location')throw e;setError((e as Error).message);throw e}
   }
   async function removeLocation(id:number){if(!confirm('למחוק את המיקום?'))return;try{await request(`/locations/${id}`,{method:'DELETE'},activeSession.token);setItems(items.filter(x=>x.id!==id))}catch(e){setError((e as Error).message)}}
-  async function review(id:number,action:'approve'|'reject'){
+  async function review(id:number,action:'approve'|'reject',allowDuplicate=false){
     const note=action==='reject'?(prompt('סיבת הדחייה (אופציונלי)')||''):'';
-    try{await request(`/location-requests/${id}/${action}`,{method:'POST',body:JSON.stringify({note})},activeSession.token);loadAll()}catch(e){setError((e as Error).message)}
+    try{await request(`/location-requests/${id}/${action}`,{method:'POST',body:JSON.stringify({note,allow_duplicate:allowDuplicate})},activeSession.token);setApprovalDuplicate(null);loadAll()}catch(e){if(e instanceof ApiError&&typeof e.detail!=='string'&&e.detail.code==='duplicate_location'){setApprovalDuplicate({id,matches:e.detail.matches||[]})}else setError((e as Error).message)}
   }
   const pendingCount=requests.filter(x=>x.status==='pending').length;
   const currentCategory:Category=view==='approvals'?'work_site':view;
@@ -68,7 +77,7 @@ function InternalApp() {
     <section className="stats"><Stat icon={<Building2/>} label="אתרי עבודה" value={items.filter(x=>x.category==='work_site').length}/><Stat icon={<Navigation/>} label="נקודות דיווח" value={items.filter(x=>x.category==='reporting_point').length}/><Stat icon={<MapPin/>} label="תחנות" value={items.filter(x=>x.place_type==='station').length}/><Stat icon={<FileCheck2/>} label="ממתינים לאישור" value={pendingCount}/></section>
     <section className="panel">
       <div className="tabs three-tabs"><button className={view==='work_site'?'active':''} onClick={()=>setView('work_site')}>אתרי עבודה</button><button className={view==='reporting_point'?'active':''} onClick={()=>setView('reporting_point')}>נקודות דיווח</button><button className={view==='approvals'?'active':''} onClick={()=>setView('approvals')}>אישורי מיקומים {pendingCount>0&&<b className="tab-count">{pendingCount}</b>}</button></div>
-      {view==='approvals'?<Approvals requests={requests} loading={loading} onReview={review}/>:<>
+      {view==='approvals'?<Approvals requests={requests} loading={loading} onReview={review} duplicateWarning={approvalDuplicate}/>:<>
         <div className="toolbar"><label className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="חיפוש לפי שם, ק״מ או הערה"/></label><select value={placeType} onChange={e=>setPlaceType(e.target.value as PlaceType|'all')}><option value="all">כל הסוגים</option><option value="station">תחנות</option><option value="segment">קטעים</option></select></div>
         {error&&<div className="error-box">{error}</div>}<LocationCards items={filtered} loading={loading} editable onEdit={setEditing} onDelete={removeLocation}/>
       </>}
@@ -91,7 +100,7 @@ function EmployeePortal(){
   if(!session)return <EmployeeLogin onLogin={saveSession}/>;
   if(session.employee.must_change_password)return <EmployeePassword session={session} onChanged={saveSession} onLogout={logout}/>;
   const activeSession=session;
-  async function submitRequest(draft:LocationDraft){try{const created=await request<LocationRequest>('/employee/location-requests',{method:'POST',body:JSON.stringify(draft)},activeSession.token);setMine([created,...mine]);setRequestOpen(false);setView('request')}catch(e){setError((e as Error).message)}}
+  async function submitRequest(draft:LocationDraft,allowDuplicate=false){const created=await request<LocationRequest>('/employee/location-requests',{method:'POST',body:JSON.stringify({...draft,allow_duplicate:allowDuplicate})},activeSession.token);setMine([created,...mine]);setRequestOpen(false);setView('request')}
   return <main className="app-shell employee-shell">
     <Header logoText="מאגר מיקומים" sub="קבוצת דנאל" name={session.employee.full_name} role="עובד" onLogout={logout}/>
     <section className="hero employee-hero"><div><p className="eyebrow">מאגר מיקומים לעובדי דנאל</p><h1>מוצאים מיקום ויוצאים לדרך</h1><p>חיפוש מהיר, ניווט ישיר והגשת מיקום חדש — מכל טלפון.</p></div><button className="primary" onClick={()=>setRequestOpen(true)}><Send size={18}/> בקשה להוספת מיקום</button></section>
@@ -100,7 +109,7 @@ function EmployeePortal(){
       {view==='request'?<MyRequests requests={mine}/>:<><div className="toolbar"><label className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="חיפוש שם או ק״מ"/></label><select value={placeType} onChange={e=>setPlaceType(e.target.value as PlaceType|'all')}><option value="all">תחנות וקטעים</option><option value="station">תחנות</option><option value="segment">קטעים</option></select></div><LocationCards items={filtered} loading={loading}/></>}
       {error&&<div className="error-box">{error}</div>}
     </section>
-    {requestOpen&&<LocationModal item={blankLocation('work_site')} requestMode onClose={()=>setRequestOpen(false)} onSave={x=>submitRequest(x as LocationDraft)}/>}
+    {requestOpen&&<LocationModal item={blankLocation('work_site')} requestMode onClose={()=>setRequestOpen(false)} onSave={(x,allow)=>submitRequest(x as LocationDraft,allow)}/>}
   </main>
 }
 
@@ -135,9 +144,9 @@ function LocationCards({items,loading,editable,onEdit,onDelete}:{items:LocationI
  return <div className="cards">{loading?<div className="empty"><h3>טוען מיקומים...</h3></div>:items.map(item=><article className="location-card" key={item.id}><div className="card-head"><span className="type-pill">{typeName(item.place_type)}</span>{editable&&<div className="card-actions"><button onClick={()=>onEdit?.(item)}><Pencil size={16}/></button><button className="danger" onClick={()=>onDelete?.(item.id)}><Trash2 size={16}/></button></div>}</div><h3>{item.name}</h3><div className="km">ק״מ {item.km||'לא הוזן'}</div>{item.coordinates&&<small>{item.coordinates}</small>}{item.notes&&<p>{item.notes}</p>}<div className="nav-actions">{item.waze_url&&<a href={item.waze_url} target="_blank" rel="noreferrer">פתיחה ב-Waze <ExternalLink size={15}/></a>}{item.maps_url&&<a href={item.maps_url} target="_blank" rel="noreferrer">Google Maps <ExternalLink size={15}/></a>}{!item.waze_url&&!item.maps_url&&<span className="muted">טרם הוזן קישור ניווט</span>}</div></article>)}{!loading&&!items.length&&<div className="empty"><MapPin size={42}/><h3>לא נמצאו מיקומים</h3><p>נסו לשנות את החיפוש או את הסינון.</p></div>}</div>
 }
 
-function Approvals({requests,loading,onReview}:{requests:LocationRequest[];loading:boolean;onReview:(id:number,a:'approve'|'reject')=>void}){
+function Approvals({requests,loading,onReview,duplicateWarning}:{requests:LocationRequest[];loading:boolean;onReview:(id:number,a:'approve'|'reject',allowDuplicate?:boolean)=>void;duplicateWarning:{id:number;matches:DuplicateMatch[]}|null}){
  const pending=requests.filter(x=>x.status==='pending');
- return <div className="approval-list">{loading?<div className="empty">טוען בקשות...</div>:pending.map(x=><article className="approval-card" key={x.id}><div><div className="request-meta"><span className="type-pill">{categoryName(x.category)} · {typeName(x.place_type)}</span><span><Clock3 size={15}/>{new Date(x.created_at).toLocaleDateString('he-IL')}</span></div><h3>{x.name}</h3><p><b>ק״מ:</b> {x.km||'לא הוזן'} · <b>הוגש על ידי:</b> {x.submitted_by_name}</p>{x.notes&&<p>{x.notes}</p>}<div className="nav-actions">{x.waze_url&&<a href={x.waze_url} target="_blank" rel="noreferrer">Waze <ExternalLink size={14}/></a>}{x.maps_url&&<a href={x.maps_url} target="_blank" rel="noreferrer">Google Maps <ExternalLink size={14}/></a>}</div></div><div className="review-actions"><button className="approve" onClick={()=>onReview(x.id,'approve')}><Check size={18}/> אישור</button><button className="reject" onClick={()=>onReview(x.id,'reject')}><X size={18}/> דחייה</button></div></article>)}{!loading&&!pending.length&&<div className="empty"><FileCheck2 size={44}/><h3>אין בקשות שממתינות לאישור</h3></div>}</div>
+ return <div className="approval-list">{loading?<div className="empty">טוען בקשות...</div>:pending.map(x=><article className="approval-card" key={x.id}><div><div className="request-meta"><span className="type-pill">{categoryName(x.category)} · {typeName(x.place_type)}</span><span><Clock3 size={15}/>{new Date(x.created_at).toLocaleDateString('he-IL')}</span></div><h3>{x.name}</h3><p><b>ק״מ:</b> {x.km||'לא הוזן'} · <b>הוגש על ידי:</b> {x.submitted_by_name}</p>{x.notes&&<p>{x.notes}</p>}<div className="nav-actions">{x.waze_url&&<a href={x.waze_url} target="_blank" rel="noreferrer">Waze <ExternalLink size={14}/></a>}{x.maps_url&&<a href={x.maps_url} target="_blank" rel="noreferrer">Google Maps <ExternalLink size={14}/></a>}</div>{duplicateWarning?.id===x.id&&<DuplicateWarning matches={duplicateWarning.matches} onCancel={()=>onReview(x.id,'reject')} onContinue={()=>onReview(x.id,'approve',true)} saving={false}/>}</div><div className="review-actions"><button className="approve" onClick={()=>onReview(x.id,'approve')}><Check size={18}/> אישור</button><button className="reject" onClick={()=>onReview(x.id,'reject')}><X size={18}/> דחייה</button></div></article>)}{!loading&&!pending.length&&<div className="empty"><FileCheck2 size={44}/><h3>אין בקשות שממתינות לאישור</h3></div>}</div>
 }
 function MyRequests({requests}:{requests:LocationRequest[]}){return <div className="approval-list">{requests.map(x=><article className="approval-card my-request" key={x.id}><div><div className="request-meta"><span className={`status-pill ${x.status}`}>{x.status==='pending'?'ממתין לאישור':x.status==='approved'?'אושר':'נדחה'}</span><span>{new Date(x.created_at).toLocaleDateString('he-IL')}</span></div><h3>{x.name}</h3><p>{categoryName(x.category)} · {typeName(x.place_type)} · ק״מ {x.km||'לא הוזן'}</p>{x.review_note&&<p><b>הערת מנהל:</b> {x.review_note}</p>}</div></article>)}{!requests.length&&<div className="empty"><Send size={42}/><h3>עדיין לא הגשת בקשות</h3></div>}</div>}
 
@@ -151,10 +160,17 @@ function useModalLifecycle(onClose:()=>void){
  },[onClose]);
 }
 
-function LocationModal({item,onClose,onSave,requestMode=false}:{item:LocationItem|LocationDraft;onClose:()=>void;onSave:(i:LocationItem|LocationDraft)=>void;requestMode?:boolean}){
+function LocationModal({item,onClose,onSave,requestMode=false}:{item:LocationItem|LocationDraft;onClose:()=>void;onSave:(i:LocationItem|LocationDraft,allowDuplicate:boolean)=>Promise<void>;requestMode?:boolean}){
  useModalLifecycle(onClose);
- const[form,setForm]=useState(item);const set=(key:string,value:string)=>setForm({...form,[key]:value} as typeof form);
- return <div className="modal-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><form className="modal" onSubmit={e=>{e.preventDefault();onSave(form)}} onMouseDown={e=>e.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">{requestMode?'בקשת עובד':'ניהול מיקום'}</p><h2>{requestMode?'בקשה להוספת מיקום':'id'in item?'עריכת מיקום':'הוספת מיקום חדש'}</h2></div><button type="button" onClick={e=>{e.preventDefault();e.stopPropagation();onClose()}} aria-label="סגירת חלון">×</button></div><div className="form-grid"><label>מאגר<select value={form.category} onChange={e=>set('category',e.target.value)}><option value="work_site">אתרי עבודה</option><option value="reporting_point">נקודות דיווח</option></select></label><label>סוג<select value={form.place_type} onChange={e=>set('place_type',e.target.value)}><option value="station">תחנה</option><option value="segment">קטע</option></select></label><label className="full">שם המיקום<input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="לדוגמה: קטע אשדוד - ניצנים" required/></label><label>ק״מ<input value={form.km} onChange={e=>set('km',e.target.value)} placeholder="145+000"/></label><label>קואורדינטות<input value={form.coordinates} onChange={e=>set('coordinates',e.target.value)} placeholder="31.8000, 34.6500"/></label><label className="full">קישור Waze<input value={form.waze_url} onChange={e=>set('waze_url',e.target.value)} placeholder="https://waze.com/ul?..."/></label><label className="full">קישור Google Maps<input value={form.maps_url} onChange={e=>set('maps_url',e.target.value)} placeholder="https://maps.google.com/..."/></label><label className="full">הערות<textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={3}/></label></div><div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>ביטול</button><button className="primary">{requestMode?'שליחת בקשה':'שמירת מיקום'}</button></div></form></div>
+ const[form,setForm]=useState(item);const[requestLink,setRequestLink]=useState(item.maps_url||item.waze_url||'');const[duplicates,setDuplicates]=useState<DuplicateMatch[]>([]);const[formError,setFormError]=useState('');const[saving,setSaving]=useState(false);
+ const set=(key:string,value:string)=>{setDuplicates([]);setForm({...form,[key]:value} as typeof form)};
+ const setCombinedType=(value:string)=>{const[category,placeType]=value.split(':') as [Category,PlaceType];setDuplicates([]);setForm({...form,category,place_type:placeType} as typeof form)};
+ async function submit(allowDuplicate=false){setSaving(true);setFormError('');try{const payload=requestMode?{...form,navigation_url:requestLink,waze_url:'',maps_url:'',coordinates:''}:form;await onSave(payload,allowDuplicate)}catch(e){if(e instanceof ApiError&&typeof e.detail!=='string'&&e.detail.code==='duplicate_location'){setDuplicates(e.detail.matches||[])}else{setFormError((e as Error).message)}}finally{setSaving(false)}}
+ return <div className="modal-backdrop" role="presentation" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><form className="modal" onSubmit={e=>{e.preventDefault();submit(false)}} onMouseDown={e=>e.stopPropagation()}><div className="modal-head"><div><p className="eyebrow">{requestMode?'בקשת עובד':'ניהול מיקום'}</p><h2>{requestMode?'בקשה להוספת מיקום':'id'in item?'עריכת מיקום':'הוספת מיקום חדש'}</h2></div><button type="button" onClick={e=>{e.preventDefault();e.stopPropagation();onClose()}} aria-label="סגירת חלון">×</button></div>{requestMode?<div className="form-grid request-location-form"><label className="full">סוג<select value={`${form.category}:${form.place_type}`} onChange={e=>setCombinedType(e.target.value)}><option value="work_site:segment">אתר עבודה — קטע</option><option value="work_site:station">אתר עבודה — תחנה</option><option value="reporting_point:segment">נקודת דיווח — קטע</option><option value="reporting_point:station">נקודת דיווח — תחנה</option></select></label><label className="full">שם המיקום<input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="לדוגמה: קטע אשדוד - ניצנים" required/></label><label className="full">ק״מ רכבתי<input value={form.km} onChange={e=>set('km',e.target.value)} placeholder="145+000" required/></label><label className="full">קישור<input type="url" value={requestLink} onChange={e=>{setRequestLink(e.target.value);setDuplicates([])}} placeholder="קישור שיתוף של Waze או Google Maps" required/><small>מספיק להדביק קישור אחד — המערכת תכין ממנו אוטומטית גם Waze וגם Google Maps.</small></label><label className="full">הערות<textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={3} placeholder="מידע נוסף שיעזור לזהות את המיקום"/></label></div>:<div className="form-grid"><label>מאגר<select value={form.category} onChange={e=>set('category',e.target.value)}><option value="work_site">אתרי עבודה</option><option value="reporting_point">נקודות דיווח</option></select></label><label>סוג<select value={form.place_type} onChange={e=>set('place_type',e.target.value)}><option value="station">תחנה</option><option value="segment">קטע</option></select></label><label className="full">שם המיקום<input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="לדוגמה: קטע אשדוד - ניצנים" required/></label><label>ק״מ<input value={form.km} onChange={e=>set('km',e.target.value)} placeholder="145+000"/></label><label>קואורדינטות<input value={form.coordinates} onChange={e=>set('coordinates',e.target.value)} placeholder="31.8000, 34.6500"/></label><label className="full">קישור Waze<input value={form.waze_url} onChange={e=>set('waze_url',e.target.value)} placeholder="https://waze.com/ul?..."/></label><label className="full">קישור Google Maps<input value={form.maps_url} onChange={e=>set('maps_url',e.target.value)} placeholder="https://maps.google.com/..."/></label><label className="full">הערות<textarea value={form.notes} onChange={e=>set('notes',e.target.value)} rows={3}/></label></div>}{duplicates.length>0&&<DuplicateWarning matches={duplicates} onCancel={onClose} onContinue={()=>submit(true)} saving={saving}/>} {formError&&<div className="error-box modal-error">{formError}</div>}<div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>ביטול</button><button className="primary" disabled={saving||duplicates.length>0}>{saving?'בודק ושולח...':requestMode?'שליחת בקשה':'שמירת מיקום'}</button></div></form></div>
+}
+
+function DuplicateWarning({matches,onCancel,onContinue,saving}:{matches:DuplicateMatch[];onCancel:()=>void;onContinue:()=>void;saving:boolean}){
+ return <section className="duplicate-warning"><div className="duplicate-title"><span><AlertTriangle size={22}/></span><div><h3>רגע, ייתכן שהמיקום כבר קיים</h3><p>מצאנו התאמה לפי שם וק״מ או לפי נקודת היעד שבקישור.</p></div></div><div className="duplicate-matches">{matches.map(match=><article key={match.id}><div><strong>{match.name}</strong><small>{categoryName(match.category)} · {typeName(match.place_type)} · ק״מ {match.km||'לא הוזן'}</small><small>{match.reasons.join(' וגם ')}</small></div><div className="nav-actions">{match.waze_url&&<a href={match.waze_url} target="_blank" rel="noreferrer">Waze <ExternalLink size={14}/></a>}{match.maps_url&&<a href={match.maps_url} target="_blank" rel="noreferrer">Google Maps <ExternalLink size={14}/></a>}</div></article>)}</div><div className="duplicate-actions"><button type="button" className="secondary" onClick={onCancel}>נכון, זו כפילות — לא לשלוח</button><button type="button" className="primary" onClick={onContinue} disabled={saving}>זה מיקום אחר — לשלוח בכל זאת</button></div></section>
 }
 
 function UsersModal({session,onClose}:{session:Session;onClose:()=>void}){
