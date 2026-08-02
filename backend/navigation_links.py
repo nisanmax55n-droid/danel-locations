@@ -84,7 +84,7 @@ def _expand_navigation_url(url: str) -> tuple[str, str]:
             final_url = response.geturl()
             body = response.read(131072).decode("utf-8", errors="ignore")
             return final_url, body
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
+    except Exception:
         return url, ""
 
 

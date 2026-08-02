@@ -76,5 +76,23 @@ class DuplicateLocationTests(unittest.TestCase):
         self.assertIn("הקישור מוביל לאותה נקודה", matches[0]["reasons"])
 
 
+class NavigationMiddlewareTests(unittest.TestCase):
+    def test_navigation_error_keeps_cors_headers(self):
+        from fastapi import Request
+        from backend import server
+
+        request = Request({
+            "type": "http",
+            "method": "POST",
+            "path": "/api/employee/location-requests",
+            "headers": [(b"origin", b"http://localhost:5173")],
+        })
+        response = server._navigation_error_response(request, "קישור לא תקין")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("קישור לא תקין".encode("utf-8"), response.body)
+        self.assertEqual(response.headers["access-control-allow-origin"], "http://localhost:5173")
+
+
 if __name__ == "__main__":
     unittest.main()

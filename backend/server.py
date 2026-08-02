@@ -22,6 +22,15 @@ def _is_navigation_write(request: Request) -> bool:
     return request.method == "PUT" and path.startswith("/api/locations/")
 
 
+def _navigation_error_response(request: Request, message: str) -> JSONResponse:
+    response = JSONResponse(status_code=422, content={"detail": message})
+    origin = request.headers.get("origin", "").rstrip("/")
+    if origin and origin in main.CORS_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    return response
+
+
 @app.middleware("http")
 async def normalize_navigation_links(request: Request, call_next):
     if not _is_navigation_write(request):
@@ -39,7 +48,12 @@ async def normalize_navigation_links(request: Request, call_next):
     try:
         normalized = normalize_navigation_payload(payload, strict=True)
     except ValueError as exc:
-        return JSONResponse(status_code=422, content={"detail": str(exc)})
+        return _navigation_error_response(request, str(exc))
+    except Exception:
+        return _navigation_error_response(
+            request,
+            "לא הצלחנו לקרוא את הקישור כרגע. יש להעתיק מחדש קישור שיתוף מלא של Google Maps או Waze.",
+        )
 
     body = json.dumps(normalized, ensure_ascii=False).encode("utf-8")
     sent = False

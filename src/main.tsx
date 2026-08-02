@@ -28,7 +28,8 @@ const categoryName=(value:Category)=>value==='work_site'?'אתר עבודה':'נ
 const typeName=(value:PlaceType)=>value==='station'?'תחנה':'קטע';
 
 async function request<T>(path:string, options:RequestInit={}, token?:string):Promise<T> {
-  const response = await fetch(`${API}${path}`, { ...options, headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{ }),...(options.headers||{})} });
+  let response:Response;
+  try{response=await fetch(`${API}${path}`, { ...options, headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{ }),...(options.headers||{})} })}catch{throw new ApiError(0,'לא הצלחנו להתחבר לשרת. יש לבדוק את החיבור ולנסות שוב.')}
   if (!response.ok) {
     let detail:ApiDetail='אירעה שגיאה';
     try { const body=await response.json(); detail=body.detail||detail; } catch { /* ignore */ }
