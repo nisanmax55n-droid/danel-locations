@@ -28,6 +28,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-before-production")
 BOOTSTRAP_USERNAME = os.getenv("BOOTSTRAP_USERNAME", "owner")
 BOOTSTRAP_PASSWORD = os.getenv("BOOTSTRAP_PASSWORD", "ChangeMe123!")
 ACCESS_TOKEN_HOURS = int(os.getenv("ACCESS_TOKEN_HOURS", "12"))
+EMPLOYEE_ACCESS_TOKEN_DAYS = int(os.getenv("EMPLOYEE_ACCESS_TOKEN_DAYS", "30"))
 CORS_ORIGINS = [origin.strip().rstrip("/") for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()]
 _employee_directory_raw = os.getenv("EMPLOYEE_DIRECTORY_URL", "").strip().rstrip("/")
 _employee_directory_parts = urllib.parse.urlsplit(_employee_directory_raw)
@@ -237,7 +238,7 @@ def issue_token(user: User) -> str:
 
 
 def issue_employee_token(employee: EmployeeAccount) -> str:
-    payload = {"sub": str(employee.id), "kind": "employee", "exp": datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_HOURS)}
+    payload = {"sub": str(employee.id), "kind": "employee", "exp": datetime.now(timezone.utc) + timedelta(days=EMPLOYEE_ACCESS_TOKEN_DAYS)}
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 

@@ -7,6 +7,7 @@
 .primary{background:var(--brand);color:#fff;box-shadow:0 8px 18px rgba(23,70,184,.2)}.primary:hover{background:var(--brand-dark);transform:translateY(-1px)}.primary:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
 .secondary{background:#fff;border-color:var(--border);color:var(--brand)}.secondary:hover{background:#f8faff;border-color:#b9c8e0}.wide{width:100%}
 .error-box{background:#fff0f2;color:#a3263a;border:1px solid #ffd2d9;border-radius:10px;padding:11px 14px;margin:13px 0}.help-note{color:var(--muted);text-align:center;font-size:13px;margin:20px 0 0}
+.session-notice{margin:15px 0 4px;padding:11px 14px;border:1px solid #b9d2ff;border-radius:10px;background:#edf4ff;color:#174690;font-weight:600}
 
 /* Login — identical visual system to 610/911 */
 .login-shell{min-height:100vh;display:grid;grid-template-columns:1.05fr .95fr;background:#fff}
