@@ -5,6 +5,7 @@ os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from backend import main
 from backend.navigation_links import normalize_navigation_payload
+from backend.passenger_stations import PASSENGER_STATIONS, seed_passenger_stations
 
 
 class NavigationLinkTests(unittest.TestCase):
@@ -92,6 +93,22 @@ class NavigationMiddlewareTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("קישור לא תקין".encode("utf-8"), response.body)
         self.assertEqual(response.headers["access-control-allow-origin"], "http://localhost:5173")
+
+
+class PassengerStationRegistryTests(unittest.TestCase):
+    def test_registry_contains_all_current_gtfs_stations_and_is_idempotent(self):
+        db = main.SessionLocal()
+        try:
+            db.query(main.Location).delete()
+            db.commit()
+
+            self.assertEqual(len(PASSENGER_STATIONS), 69)
+            self.assertEqual(seed_passenger_stations(db, main.Location, main.User), 69)
+            self.assertEqual(db.query(main.Location).count(), 69)
+            self.assertEqual(seed_passenger_stations(db, main.Location, main.User), 0)
+            self.assertEqual(db.query(main.Location).count(), 69)
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

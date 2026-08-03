@@ -26,6 +26,10 @@ const API = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 const blankLocation = (category:Category):LocationDraft => ({category,place_type:'segment',name:'',km:'',waze_url:'',maps_url:'',coordinates:'',notes:''});
 const categoryName=(value:Category)=>value==='work_site'?'אתר עבודה':'נקודת דיווח';
 const typeName=(value:PlaceType)=>value==='station'?'תחנה':'קטע';
+const PASSENGER_STATION_MARKER='[תחנת נוסעים רכבת ישראל]';
+const hebrewCollator=new Intl.Collator('he',{sensitivity:'base',numeric:true});
+const sortByName=(a:LocationItem,b:LocationItem)=>hebrewCollator.compare(a.name,b.name);
+const isPassengerStation=(item:LocationItem)=>item.notes.includes(PASSENGER_STATION_MARKER);
 
 async function request<T>(path:string, options:RequestInit={}, token?:string):Promise<T> {
   let response:Response;
@@ -56,7 +60,7 @@ function InternalApp() {
   const loadAll=()=>{if(!session)return;setLoading(true);Promise.all([request<LocationItem[]>('/locations',{},session.token),request<LocationRequest[]>('/location-requests?request_status=all',{},session.token)]).then(([locations,pending])=>{setItems(locations);setRequests(pending)}).catch(e=>{setError(e.message);logout()}).finally(()=>setLoading(false))};
   useEffect(loadAll,[session?.token]);
   const saveSession=(next:Session,remember=true)=>{localStorage.removeItem('danel_location_session');sessionStorage.removeItem('danel_location_session');(remember?localStorage:sessionStorage).setItem('danel_location_session',JSON.stringify(next));setSession(next)};
-  const filtered=useMemo(()=>items.filter(item=>view!=='approvals'&&item.category===view&&(placeType==='all'||item.place_type===placeType)&&`${item.name} ${item.km} ${item.notes}`.toLowerCase().includes(query.toLowerCase())),[items,view,placeType,query]);
+  const filtered=useMemo(()=>items.filter(item=>view!=='approvals'&&item.category===view&&!isPassengerStation(item)&&(placeType==='all'||item.place_type===placeType)&&`${item.name} ${item.km} ${item.notes}`.toLowerCase().includes(query.toLowerCase())).sort(sortByName),[items,view,placeType,query]);
   if(!session) return <InternalLogin onLogin={saveSession}/>;
   if(session.user.must_change_password) return <InternalPassword session={session} onChanged={saveSession} onLogout={logout}/>;
   const activeSession=session;
@@ -75,7 +79,7 @@ function InternalApp() {
   return <main className="app-shell">
     <Header logoText="מאגר מיקומים" sub="מרכז המיקומים התפעולי" name={session.user.full_name} role={session.user.role==='owner'?'בעלים':'מנהל'} onLogout={logout} extra={<><a className="portal-header-link" href="/portal" target="_blank" rel="noreferrer" title="פתיחת כניסת העובדים"><Users size={18}/><span>כניסת עובדים</span></a>{session.user.role==='owner'&&<button type="button" onClick={()=>setUsersOpen(true)} title="ניהול משתמשים"><UserCog size={18}/></button>}</>}/>
     <section className="hero"><div><p className="eyebrow">מרכז מיקומים תפעולי</p><h1>אתרי עבודה ונקודות דיווח</h1><p>כל התחנות, הקטעים, הקילומטרים וקישורי הניווט במקום אחד.</p></div>{view!=='approvals'&&<button className="primary" onClick={()=>setEditing(blankLocation(currentCategory))}><Plus size={18}/> הוספת מיקום</button>}</section>
-    <section className="stats"><Stat icon={<Building2/>} label="אתרי עבודה" value={items.filter(x=>x.category==='work_site').length}/><Stat icon={<Navigation/>} label="נקודות דיווח" value={items.filter(x=>x.category==='reporting_point').length}/><Stat icon={<MapPin/>} label="תחנות" value={items.filter(x=>x.place_type==='station').length}/><Stat icon={<FileCheck2/>} label="ממתינים לאישור" value={pendingCount}/></section>
+    <section className="stats"><Stat icon={<Building2/>} label="אתרי עבודה" value={items.filter(x=>x.category==='work_site'&&!isPassengerStation(x)).length}/><Stat icon={<Navigation/>} label="נקודות דיווח" value={items.filter(x=>x.category==='reporting_point'&&!isPassengerStation(x)).length}/><Stat icon={<MapPin/>} label="תחנות נוסעים" value={items.filter(isPassengerStation).length}/><Stat icon={<FileCheck2/>} label="ממתינים לאישור" value={pendingCount}/></section>
     <section className="panel">
       <div className="tabs three-tabs"><button className={view==='work_site'?'active':''} onClick={()=>setView('work_site')}>אתרי עבודה</button><button className={view==='reporting_point'?'active':''} onClick={()=>setView('reporting_point')}>נקודות דיווח</button><button className={view==='approvals'?'active':''} onClick={()=>setView('approvals')}>אישורי מיקומים {pendingCount>0&&<b className="tab-count">{pendingCount}</b>}</button></div>
       {view==='approvals'?<Approvals requests={requests} loading={loading} onReview={review} duplicateWarning={approvalDuplicate}/>:<>
@@ -98,7 +102,7 @@ function EmployeePortal(){
   const logout=()=>clearSession();
   const load=()=>{if(!session||session.employee.must_change_password)return;setLoading(true);setError('');Promise.all([request<LocationItem[]>('/employee/locations',{},session.token),request<LocationRequest[]>('/employee/location-requests',{},session.token)]).then(([a,b])=>{setItems(a);setMine(b)}).catch(e=>{if(e instanceof ApiError&&e.status===401){clearSession('החיבור הקודם פג. יש להתחבר מחדש כדי להמשיך.');return}setError(e.message)}).finally(()=>setLoading(false))};
   useEffect(load,[session?.token,session?.employee.must_change_password]);
-  const filtered=useMemo(()=>items.filter(x=>view!=='request'&&x.category===view&&(placeType==='all'||x.place_type===placeType)&&`${x.name} ${x.km} ${x.notes}`.toLowerCase().includes(query.toLowerCase())),[items,view,placeType,query]);
+  const filtered=useMemo(()=>items.filter(x=>view!=='request'&&x.category===view&&!isPassengerStation(x)&&(placeType==='all'||x.place_type===placeType)&&`${x.name} ${x.km} ${x.notes}`.toLowerCase().includes(query.toLowerCase())).sort(sortByName),[items,view,placeType,query]);
   if(!session)return <EmployeeLogin onLogin={saveSession} notice={sessionNotice}/>;
   if(session.employee.must_change_password)return <EmployeePassword session={session} onChanged={saveSession} onLogout={logout}/>;
   const activeSession=session;

@@ -18,6 +18,8 @@ from pwdlib import PasswordHash
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 
+from backend.passenger_stations import seed_passenger_stations
+
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./locations.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
@@ -230,6 +232,12 @@ def bootstrap_owner() -> None:
         db.commit()
 
 bootstrap_owner()
+
+
+@app.on_event("startup")
+def ensure_passenger_station_registry() -> None:
+    with SessionLocal() as db:
+        seed_passenger_stations(db, Location, User)
 
 
 def issue_token(user: User) -> str:
