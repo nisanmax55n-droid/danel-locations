@@ -30,6 +30,19 @@ const PASSENGER_STATION_MARKER='[תחנת נוסעים רכבת ישראל]';
 const hebrewCollator=new Intl.Collator('he',{sensitivity:'base',numeric:true});
 const sortByName=(a:LocationItem,b:LocationItem)=>hebrewCollator.compare(a.name,b.name);
 const isPassengerStation=(item:LocationItem)=>item.notes.includes(PASSENGER_STATION_MARKER);
+const plainLocationName=(value:string)=>value.toLocaleLowerCase('he').replace(/[^0-9a-z\u0590-\u05ff]+/g,'');
+function locationGroupKey(item:LocationItem){
+  if(item.place_type!=='segment')return `${item.category}:station:${item.id}`;
+  const withoutPrefix=item.name.replace(/^\s*קטע\s+/i,'');
+  const endpoints=withoutPrefix.split(/\s*[-–—]\s*/).filter(Boolean);
+  const routeKey=endpoints.length===2?endpoints.map(plainLocationName).sort().join('|'):plainLocationName(withoutPrefix);
+  return `${item.category}:segment:${routeKey}`;
+}
+function groupLocations(items:LocationItem[]){
+  const groups=new Map<string,LocationItem[]>();
+  items.forEach(item=>{const key=locationGroupKey(item);groups.set(key,[...(groups.get(key)||[]),item])});
+  return Array.from(groups.values()).map(variants=>variants.sort((a,b)=>hebrewCollator.compare(a.km||'',b.km||'')));
+}
 
 async function request<T>(path:string, options:RequestInit={}, token?:string):Promise<T> {
   let response:Response;
@@ -147,7 +160,8 @@ function PasswordScreen<T>({token,endpoint,onChanged,onLogout}:{token:string;end
 }
 
 function LocationCards({items,loading,editable,onEdit,onDelete}:{items:LocationItem[];loading:boolean;editable?:boolean;onEdit?:(x:LocationItem)=>void;onDelete?:(id:number)=>void}){
- return <div className="cards">{loading?<div className="empty"><h3>טוען מיקומים...</h3></div>:items.map(item=><article className="location-card" key={item.id}><div className="card-head"><span className="type-pill">{typeName(item.place_type)}</span>{editable&&<div className="card-actions"><button onClick={()=>onEdit?.(item)}><Pencil size={16}/></button><button className="danger" onClick={()=>onDelete?.(item.id)}><Trash2 size={16}/></button></div>}</div><h3>{item.name}</h3><div className="km">ק״מ {item.km||'לא הוזן'}</div>{item.coordinates&&<small>{item.coordinates}</small>}{item.notes&&<p>{item.notes}</p>}<div className="nav-actions">{item.waze_url&&<a href={item.waze_url} target="_blank" rel="noreferrer">פתיחה ב-Waze <ExternalLink size={15}/></a>}{item.maps_url&&<a href={item.maps_url} target="_blank" rel="noreferrer">Google Maps <ExternalLink size={15}/></a>}{!item.waze_url&&!item.maps_url&&<span className="muted">טרם הוזן קישור ניווט</span>}</div></article>)}{!loading&&!items.length&&<div className="empty"><MapPin size={42}/><h3>לא נמצאו מיקומים</h3><p>נסו לשנות את החיפוש או את הסינון.</p></div>}</div>
+ const groups=groupLocations(items);
+ return <div className="cards">{loading?<div className="empty"><h3>טוען מיקומים...</h3></div>:groups.map(variants=>{const first=variants[0];return <article className="location-card grouped-location" key={locationGroupKey(first)}><div className="card-head"><span className="type-pill">{typeName(first.place_type)}</span>{variants.length>1&&<span className="variant-count">{variants.length} מיקומי ק״מ</span>}</div><h3>{first.name}</h3><div className="location-variants">{variants.map(item=><section className="location-variant" key={item.id}><div className="variant-head"><div className="km">ק״מ {item.km||'לא הוזן'}</div>{editable&&<div className="card-actions"><button title="עריכה" onClick={()=>onEdit?.(item)}><Pencil size={16}/></button><button title="מחיקה" className="danger" onClick={()=>onDelete?.(item.id)}><Trash2 size={16}/></button></div>}</div>{item.coordinates&&<small>{item.coordinates}</small>}{item.notes&&<p>{item.notes}</p>}<div className="nav-actions">{item.waze_url&&<a href={item.waze_url} target="_blank" rel="noreferrer">פתיחה ב-Waze <ExternalLink size={15}/></a>}{item.maps_url&&<a href={item.maps_url} target="_blank" rel="noreferrer">Google Maps <ExternalLink size={15}/></a>}{!item.waze_url&&!item.maps_url&&<span className="muted">טרם הוזן קישור ניווט</span>}</div></section>)}</div></article>})}{!loading&&!items.length&&<div className="empty"><MapPin size={42}/><h3>לא נמצאו מיקומים</h3><p>נסו לשנות את החיפוש או את הסינון.</p></div>}</div>
 }
 
 function Approvals({requests,loading,onReview,duplicateWarning}:{requests:LocationRequest[];loading:boolean;onReview:(id:number,a:'approve'|'reject',allowDuplicate?:boolean)=>void;duplicateWarning:{id:number;matches:DuplicateMatch[]}|null}){

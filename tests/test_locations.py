@@ -76,6 +76,33 @@ class DuplicateLocationTests(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertIn("הקישור מוביל לאותה נקודה", matches[0]["reasons"])
 
+    def test_reversed_segment_with_same_km_is_a_duplicate(self):
+        candidate = main.LocationWriteIn(
+            category="work_site",
+            place_type="segment",
+            name="ניצנים – אשדוד",
+            km="145+000",
+        )
+
+        matches = main.find_location_duplicates(self.db, candidate)
+
+        self.assertEqual(len(matches), 1)
+        self.assertIn("אותו שם ואותו ק״מ רכבתי", matches[0]["reasons"])
+
+    def test_reversed_segment_with_different_km_uses_existing_registry_name(self):
+        candidate = main.LocationWriteIn(
+            category="work_site",
+            place_type="segment",
+            name="ניצנים – אשדוד",
+            km="146+000",
+        )
+
+        self.assertEqual(main.find_location_duplicates(self.db, candidate), [])
+        self.assertEqual(
+            main.canonical_location_name(self.db, candidate),
+            "קטע אשדוד - ניצנים",
+        )
+
 
 class NavigationMiddlewareTests(unittest.TestCase):
     def test_navigation_error_keeps_cors_headers(self):
