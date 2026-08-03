@@ -28,6 +28,27 @@ def _pair(lat: str | float, lng: str | float) -> tuple[float, float] | None:
     return parsed if _valid_pair(*parsed) else None
 
 
+def _navigation_provider(url: str) -> str | None:
+    try:
+        parsed = urllib.parse.urlsplit(url.strip())
+    except (TypeError, ValueError):
+        return None
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if host == "waze.com" or host.endswith(".waze.com") or host == "waze.to" or host.endswith(".waze.to"):
+        return "waze"
+    if (
+        host == "goo.gl"
+        or host.endswith(".goo.gl")
+        or host == "google.com"
+        or host.endswith(".google.com")
+        or host.startswith("google.")
+    ):
+        return "google"
+    return None
+
+
 def extract_coordinates(value: str) -> tuple[float, float] | None:
     if not value:
         return None
@@ -113,10 +134,12 @@ def normalize_navigation_payload(payload: dict[str, Any], *, strict: bool = Fals
     coordinates_value = str(normalized.get("coordinates") or "").strip()
     waze_url = str(normalized.get("waze_url") or "").strip()
     maps_url = str(normalized.get("maps_url") or "").strip()
+
+    provider = _navigation_provider(navigation_url) if navigation_url else None
     if navigation_url and not waze_url and not maps_url:
-        if "waze." in urllib.parse.urlsplit(navigation_url).netloc.lower():
+        if provider == "waze":
             waze_url = navigation_url
-        else:
+        elif provider == "google":
             maps_url = navigation_url
 
     coordinates = extract_coordinates(coordinates_value)
@@ -128,7 +151,12 @@ def normalize_navigation_payload(payload: dict[str, Any], *, strict: bool = Fals
 
     has_navigation_input = bool(coordinates_value or waze_url or maps_url or navigation_url)
     if not coordinates:
-        if strict and has_navigation_input:
+        valid_share_url = bool(
+            provider
+            or _navigation_provider(waze_url)
+            or _navigation_provider(maps_url)
+        )
+        if strict and has_navigation_input and not valid_share_url:
             raise ValueError("לא ניתן לחלץ נקודת יעד מהקישור. יש להדביק קישור שיתוף מלא של Google Maps או Waze.")
         normalized["coordinates"] = coordinates_value
         normalized["waze_url"] = waze_url
