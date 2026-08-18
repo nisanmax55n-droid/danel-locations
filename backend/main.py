@@ -43,6 +43,8 @@ EMPLOYEE_DIRECTORY_URL = urllib.parse.urlunsplit((
     _employee_directory_parts.fragment,
 ))
 EMPLOYEE_DIRECTORY_KEY = os.getenv("EMPLOYEE_DIRECTORY_KEY", "")
+# Shared server-to-server key used only by Danel Operations to read approved reporting points.
+OPERATIONS_INTEGRATION_KEY = os.getenv("OPERATIONS_INTEGRATION_KEY", "")
 EMPLOYEE_INITIAL_PASSWORD = "Aa1234"
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
@@ -693,6 +695,16 @@ def reset_employee_password(
     db.commit()
     db.refresh(employee)
     return employee_payload(employee)
+
+
+@app.get("/api/integrations/reporting-points")
+def operational_reporting_points(request: Request, db: Session = Depends(db_session)):
+    """Read-only server integration for the Danel Operations operational map."""
+    supplied_key = request.headers.get("X-Integration-Key", "")
+    if not OPERATIONS_INTEGRATION_KEY or not secrets.compare_digest(supplied_key, OPERATIONS_INTEGRATION_KEY):
+        raise HTTPException(status_code=401, detail="אין הרשאה לחיבור המפה התפעולית")
+    stmt = select(Location).where(Location.category == "reporting_point").order_by(Location.place_type, Location.name)
+    return [location_payload(x) for x in db.scalars(stmt).all()]
 
 
 @app.get("/api/locations")
