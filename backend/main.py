@@ -700,7 +700,7 @@ def reset_employee_password(
 
 @app.get("/api/integrations/reporting-points")
 def operational_reporting_points(request: Request, db: Session = Depends(db_session)):
-    """Read-only server integration for the Danel Operations operational map."""
+    """Read-only, authenticated feed of approved reporting points for the Danel Operations map."""
     supplied_key = request.headers.get("X-Integration-Key", "")
     if not OPERATIONS_INTEGRATION_KEY or not secrets.compare_digest(supplied_key, OPERATIONS_INTEGRATION_KEY):
         raise HTTPException(status_code=401, detail="אין הרשאה לחיבור המפה התפעולית")
